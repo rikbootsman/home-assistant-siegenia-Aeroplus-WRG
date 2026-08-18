@@ -9,6 +9,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN, DATA_CLIENT, DATA_COORDINATOR
+from .device import build_device_info
 
 def _combined(data: dict | None) -> dict:
     data = data or {}
@@ -78,10 +79,16 @@ class SiegeniaFanPowerNumber(CoordinatorEntity, NumberEntity):
         for part in ("state", "params", "info"):
             d = data.get(part) or {}
             if isinstance(d, dict):
-                system_name = d.get("systemname") or d.get("device_name")
+                system_name = d.get("systemname") or d.get("devicename") or d.get("device_name")
                 if system_name:
                     return system_name
         return None
+
+    @property
+    def device_info(self):
+        return build_device_info(
+            self.coordinator.data, self._entry.entry_id, self._entry.data.get("host")
+        )
 
     def _d(self) -> dict:
         return _combined(self.coordinator.data)

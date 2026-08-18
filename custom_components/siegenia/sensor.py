@@ -87,7 +87,7 @@ class SiegeniaKeySensor(CoordinatorEntity, SensorEntity):
         for part in ("state", "params", "info"):
             d = data.get(part) or {}
             if isinstance(d, dict):
-                system_name = d.get("systemname") or d.get("device_name")
+                system_name = d.get("systemname") or d.get("devicename") or d.get("device_name")
                 if system_name:
                     return system_name
         return None
@@ -131,7 +131,7 @@ class SiegeniaRawStateSensor(CoordinatorEntity, SensorEntity):
         for part in ("state", "params", "info"):
             d = data.get(part) or {}
             if isinstance(d, dict):
-                system_name = d.get("systemname") or d.get("device_name")
+                system_name = d.get("systemname") or d.get("devicename") or d.get("device_name")
                 if system_name:
                     return system_name
         return None
@@ -142,13 +142,28 @@ class SiegeniaRawStateSensor(CoordinatorEntity, SensorEntity):
             self.coordinator.data, self._entry.entry_id, self._entry.data.get("host")
         )
 
-    @property
-    def native_value(self) -> str:
-        from json import dumps
+    def _combined(self) -> dict:
         data = self.coordinator.data or {}
         combined = {}
         for part in ("state", "params", "info"):
             d = data.get(part) or {}
             if isinstance(d, dict):
                 combined.update(d)
-        return dumps(combined, ensure_ascii=False)
+        return combined
+
+    @property
+    def native_value(self) -> str:
+        # The full JSON blows past Home Assistant's 255 character state limit and
+        # would log an error on every poll, so the state is only a short summary
+        # and the payload lives in the attributes.
+        return f"{len(self._combined())} Felder"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        from json import dumps
+
+        combined = self._combined()
+        return {
+            "raw_state": dumps(combined, ensure_ascii=False),
+            **{k: v for k, v in combined.items() if not isinstance(v, (dict, list))},
+        }

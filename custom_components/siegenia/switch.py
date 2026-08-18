@@ -39,7 +39,7 @@ class SiegeniaAutoModeSwitch(CoordinatorEntity, SwitchEntity):
         for part in ("state", "params", "info"):
             d = data.get(part) or {}
             if isinstance(d, dict):
-                system_name = d.get("systemname") or d.get("device_name")
+                system_name = d.get("systemname") or d.get("devicename") or d.get("device_name")
                 if system_name:
                     return system_name
         return None
@@ -53,11 +53,11 @@ class SiegeniaAutoModeSwitch(CoordinatorEntity, SwitchEntity):
         return bool(d.get("automode", d.get("auto_mode", False)))
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._client.set_device_params({"automode": True, "auto_mode": True})
+        await self._client.set_device_params({"automode": True})
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._client.set_device_params({"automode": False, "auto_mode": False})
+        await self._client.set_device_params({"automode": False})
         await self.coordinator.async_request_refresh()
 
     @property
