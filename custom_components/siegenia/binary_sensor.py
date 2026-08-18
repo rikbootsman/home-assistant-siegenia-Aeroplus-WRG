@@ -32,7 +32,7 @@ class SiegeniaOnlineBinarySensor(CoordinatorEntity, BinarySensorEntity):
         for part in ("state", "params", "info"):
             d = data.get(part) or {}
             if isinstance(d, dict):
-                system_name = d.get("systemname") or d.get("device_name")
+                system_name = d.get("systemname") or d.get("devicename") or d.get("device_name")
                 if system_name:
                     return system_name
         return None

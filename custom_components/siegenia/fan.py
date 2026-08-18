@@ -10,11 +10,22 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN, DATA_CLIENT, DATA_COORDINATOR
+from .device import build_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
 PERCENTAGE_FLAG = getattr(FanEntityFeature, "SET_PERCENTAGE", getattr(FanEntityFeature, "SET_SPEED", 0))
 DEFAULT_MAX_M3H = 60
+
+
+def _active_param(active: bool) -> dict[str, Any]:
+    """Build the on/off parameter.
+
+    getDeviceState reports the flag flat as "deviceactive", but setDeviceParams
+    expects it nested below "devicestate". Sent flat, the device silently
+    accepts the call and ignores it.
+    """
+    return {"devicestate": {"deviceactive": active}}
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
@@ -41,10 +52,16 @@ class SiegeniaFanEntity(CoordinatorEntity, FanEntity):
         for part in ("state", "params", "info"):
             d = data.get(part) or {}
             if isinstance(d, dict):
-                system_name = d.get("systemname") or d.get("device_name")
+                system_name = d.get("systemname") or d.get("devicename") or d.get("device_name")
                 if system_name:
                     return system_name
         return None
+
+    @property
+    def device_info(self):
+        return build_device_info(
+            self.coordinator.data, self._entry.entry_id, self._entry.data.get("host")
+        )
 
     def _combined(self) -> dict:
         data = self.coordinator.data or {}
@@ -91,7 +108,9 @@ class SiegeniaFanEntity(CoordinatorEntity, FanEntity):
     @property
     def is_on(self) -> bool:
         d = self._combined()
-        for k in ("power", "on", "enabled"):
+        # Siegenia reports the on/off state as "deviceactive"; the other keys are
+        # kept as a fallback for device types that might not send it.
+        for k in ("deviceactive", "power", "on", "enabled"):
             if k in d:
                 return bool(d.get(k))
         try:
@@ -102,6 +121,10 @@ class SiegeniaFanEntity(CoordinatorEntity, FanEntity):
 
     @property
     def percentage(self) -> int | None:
+        # The device keeps its last fanpower while switched off; Home Assistant
+        # expects 0 for an off fan.
+        if not self.is_on:
+            return 0
         d = self._combined()
         try:
             p = int(d.get("fanpower", 0) or 0)  # Siegenia reports percent 0..100
@@ -135,26 +158,37 @@ class SiegeniaFanEntity(CoordinatorEntity, FanEntity):
             "manual_cap_reported": manual_cap_field,
             "effective_maxfanpower_m3h": eff_max,
             "airflow_m3h": airflow,
-            "systemname": d.get("systemname") or d.get("device_name"),
+            "systemname": d.get("systemname") or d.get("devicename") or d.get("device_name"),
         }
 
     async def async_set_percentage(self, percentage: int) -> None:
         target_pct = max(0, min(100, int(percentage or 0)))
+        # 0 % means off in Home Assistant; the device rejects "fanpower": 0.
+        if target_pct == 0:
+            await self.async_turn_off()
+            return
         params: dict[str, Any] = {
+            **_active_param(True),
             "automode": False,
-            "auto_mode": False,
             "fanpower": target_pct,
         }
         await self._client.set_device_params(params)
         await self.coordinator.async_request_refresh()
 
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        if "percentage" in kwargs:
-            await self.async_set_percentage(kwargs["percentage"])
+    async def async_turn_on(
+        self,
+        percentage: int | None = None,
+        preset_mode: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if percentage is None:
+            percentage = kwargs.get("percentage")
+        if percentage is not None:
+            await self.async_set_percentage(percentage)
             return
-        await self._client.set_device_params({"power": True, "on": True, "enabled": True})
+        await self._client.set_device_params(_active_param(True))
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._client.set_device_params({"power": False, "on": False, "enabled": False, "fanpower": 0})
+        await self._client.set_device_params(_active_param(False))
         await self.coordinator.async_request_refresh()
